@@ -1,0 +1,42 @@
+name: security-scan
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  secrets-scan:
+    name: Secrets scan (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest detect --source /repo --exit-code 0
+
+  sast:
+    name: SAST (Semgrep, OWASP Top 10 rules)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker run --rm -v "$PWD:/src" semgrep/semgrep semgrep scan --config p/owasp-top-ten --metrics=off /src
+
+  sca:
+    name: Dependencies and files (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker run --rm -v "$PWD:/src" aquasec/trivy fs --severity HIGH,CRITICAL --exit-code 0 /src
+
+  dast:
+    name: DAST (OWASP ZAP)
+    runs-on: ubuntu-latest
+    steps:
+      - run: docker run -d -p 3000:3000 bkimminich/juice-shop
+      - run: sleep 40
+      - run: |
+          chmod 777 "$PWD"
+          docker run --rm --network host -v "$PWD:/zap/wrk:rw" ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t http://localhost:3000 -I -r zap-report.html
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-report
+          path: zap-report.html
